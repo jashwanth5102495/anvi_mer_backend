@@ -1,14 +1,33 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import pg from 'pg';
 import { Commodity, ContainerTracking, OrderRequest, MobileAppUser, FarmerListing, AdminMobileStats } from '../types/index.js';
 
+const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Data store file location (works in container, Docker, Railway volume, and locally)
 const DATA_DIR = path.resolve(__dirname, '../../data');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
+
+// Initialize PostgreSQL Connection Pool if DATABASE_URL is configured (Railway Postgres node)
+let pool: pg.Pool | null = null;
+let pgConnected = false;
+
+if (process.env.DATABASE_URL) {
+  try {
+    const isInternal = process.env.DATABASE_URL.includes('railway.internal');
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: isInternal ? false : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false)
+    });
+    console.log('[DB] PostgreSQL pool configured with DATABASE_URL');
+  } catch (err) {
+    console.error('[DB] Failed to configure PostgreSQL pool:', err);
+  }
+}
 
 interface DatabaseSchema {
   users: MobileAppUser[];
@@ -247,41 +266,8 @@ const INITIAL_COMMODITIES: Commodity[] = [
   }
 ];
 
-const INITIAL_USERS: MobileAppUser[] = [
-  {
-    id: 'usr_buyer_01',
-    userId: 'ANVI-AE-8840',
-    password: 'AnviDubai2026!',
-    role: 'buyer',
-    companyName: 'Gulf Harvest Trading LLC',
-    contactName: 'Tariq Al-Mansoor',
-    email: 'tariq@gulfharvest.ae',
-    phone: '+971 50 884 1029',
-    destinationPort: 'Jebel Ali Port (Dubai, UAE)',
-    status: 'ACTIVE',
-    assignedContainer: 'AM-8840',
-    allocatedCommodities: ['1121-xxl-basmati-rice', 'g4-green-chilly'],
-    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-    lastLoginAt: new Date().toISOString()
-  },
-  {
-    id: 'usr_farmer_01',
-    userId: 'FARMER-AP-108',
-    password: 'KisanTrade@2026',
-    role: 'farmer',
-    companyName: 'Andhra Organic Farmer FPO',
-    contactName: 'Rameshwar Patil',
-    email: 'rameshwar@kisanfpo.in',
-    phone: '+91 98480 12345',
-    destinationPort: 'Guntur APMC Mandi Hub (Andhra Pradesh)',
-    mandiLocation: 'Guntur APMC Grain Market Yard',
-    status: 'ACTIVE',
-    assignedContainer: 'AM-7721',
-    allocatedCommodities: ['sona-masoori-steam', '1-year-raw-sona'],
-    createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
-    lastLoginAt: new Date().toISOString()
-  }
-];
+// Production standard: No hardcoded demo users. Only admin-provisioned live accounts.
+const INITIAL_USERS: MobileAppUser[] = [];
 
 const INITIAL_FARMER_LISTINGS: FarmerListing[] = [
   {
@@ -374,6 +360,76 @@ class DatabaseService {
 
   constructor() {
     this.data = this.loadData();
+    if (pool) {
+      this.initPostgres();
+    }
+  }
+
+  private async initPostgres(): Promise<void> {
+    if (!pool) return;
+    try {
+      const client = await pool.connect();
+      pgConnected = true;
+      console.log('[DB] Connected to PostgreSQL successfully!');
+
+      // Create production tables
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS anvi_mobile_users (
+          id VARCHAR(100) PRIMARY KEY,
+          user_id VARCHAR(100) UNIQUE NOT NULL,
+          data JSONB NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS anvi_farmer_listings (
+          id VARCHAR(100) PRIMARY KEY,
+          data JSONB NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS anvi_orders (
+          id VARCHAR(100) PRIMARY KEY,
+          data JSONB NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+
+      // Read persistent users from PostgreSQL
+      const userRes = await client.query('SELECT data FROM anvi_mobile_users ORDER BY created_at DESC');
+      if (userRes.rows.length > 0) {
+        console.log(`[DB] Loaded ${userRes.rows.length} mobile accounts from PostgreSQL`);
+        this.data.users = userRes.rows.map(r => r.data);
+        this.saveData();
+      } else if (this.data.users.length > 0) {
+        for (const u of this.data.users) {
+          await client.query(
+            'INSERT INTO anvi_mobile_users (id, user_id, data) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING',
+            [u.id, u.userId, JSON.stringify(u)]
+          );
+        }
+      }
+
+      // Read persistent farmer listings from PostgreSQL
+      const listingRes = await client.query('SELECT data FROM anvi_farmer_listings ORDER BY created_at DESC');
+      if (listingRes.rows.length > 0) {
+        console.log(`[DB] Loaded ${listingRes.rows.length} farmer listings from PostgreSQL`);
+        this.data.farmerListings = listingRes.rows.map(r => r.data);
+        this.saveData();
+      } else if (this.data.farmerListings.length > 0) {
+        for (const l of this.data.farmerListings) {
+          await client.query(
+            'INSERT INTO anvi_farmer_listings (id, data) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING',
+            [l.id, JSON.stringify(l)]
+          );
+        }
+      }
+
+      client.release();
+    } catch (err) {
+      console.error('[DB] PostgreSQL initialization error:', err);
+      pgConnected = false;
+    }
   }
 
   private loadData(): DatabaseSchema {
@@ -451,6 +507,14 @@ class DatabaseService {
 
     this.data.users.unshift(newUser);
     this.saveData();
+
+    if (pool && pgConnected) {
+      pool.query(
+        'INSERT INTO anvi_mobile_users (id, user_id, data) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET data = $3, updated_at = NOW()',
+        [newUser.id, newUser.userId, JSON.stringify(newUser)]
+      ).catch(err => console.error('[DB] Postgres insert user error:', err));
+    }
+
     return newUser;
   }
 
@@ -463,8 +527,17 @@ class DatabaseService {
       ...updates
     };
 
+    const updatedUser = this.data.users[userIndex];
     this.saveData();
-    return this.data.users[userIndex];
+
+    if (pool && pgConnected) {
+      pool.query(
+        'UPDATE anvi_mobile_users SET data = $1, updated_at = NOW() WHERE id = $2 OR user_id = $2',
+        [JSON.stringify(updatedUser), id]
+      ).catch(err => console.error('[DB] Postgres update user error:', err));
+    }
+
+    return updatedUser;
   }
 
   public deleteUser(id: string): boolean {
@@ -472,6 +545,14 @@ class DatabaseService {
     this.data.users = this.data.users.filter(u => u.id !== id && u.userId.toLowerCase() !== id.toLowerCase());
     if (this.data.users.length !== prevLen) {
       this.saveData();
+
+      if (pool && pgConnected) {
+        pool.query(
+          'DELETE FROM anvi_mobile_users WHERE id = $1 OR user_id = $1',
+          [id]
+        ).catch(err => console.error('[DB] Postgres delete user error:', err));
+      }
+
       return true;
     }
     return false;
@@ -496,6 +577,14 @@ class DatabaseService {
     };
     this.data.farmerListings.unshift(newListing);
     this.saveData();
+
+    if (pool && pgConnected) {
+      pool.query(
+        'INSERT INTO anvi_farmer_listings (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = $2',
+        [newListing.id, JSON.stringify(newListing)]
+      ).catch(err => console.error('[DB] Postgres insert listing error:', err));
+    }
+
     return newListing;
   }
 
@@ -513,6 +602,14 @@ class DatabaseService {
     };
     this.data.orders.unshift(newOrder);
     this.saveData();
+
+    if (pool && pgConnected) {
+      pool.query(
+        'INSERT INTO anvi_orders (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = $2',
+        [newOrder.id, JSON.stringify(newOrder)]
+      ).catch(err => console.error('[DB] Postgres insert order error:', err));
+    }
+
     return newOrder;
   }
 
@@ -537,6 +634,19 @@ class DatabaseService {
       suspendedUsers: this.data.users.filter(u => u.status === 'SUSPENDED').length,
       totalOrders: this.data.orders.length,
       activeShipmentsTracked: Object.keys(this.data.containers).length
+    };
+  }
+
+  // --- DATABASE HEALTH & STATUS ---
+  public getDatabaseStatus() {
+    return {
+      type: pool ? (pgConnected ? 'PostgreSQL' : 'PostgreSQL (Connecting...)') : 'Local JSON Store',
+      connected: pgConnected || !pool,
+      isPostgresActive: pgConnected,
+      urlConfigured: Boolean(process.env.DATABASE_URL),
+      totalUsers: this.data.users.length,
+      totalFarmerListings: this.data.farmerListings.length,
+      totalOrders: this.data.orders.length
     };
   }
 }

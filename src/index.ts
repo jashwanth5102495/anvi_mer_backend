@@ -8,6 +8,7 @@ import { trackingRouter } from './routes/tracking.js';
 import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { farmerRouter } from './routes/farmer.js';
+import { db } from './data/db.js';
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     status: 'healthy',
     service: 'anvi-mercantile-backend',
+    database: db.getDatabaseStatus(),
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime())
   });
