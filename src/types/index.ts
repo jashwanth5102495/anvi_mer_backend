@@ -31,19 +31,34 @@ export interface ContainerTracking {
 
 export interface OrderRequest {
   id: string;
-  commodityId: string;
-  commodityName: string;
-  orderType: 'bulk' | 'sample';
-  volume: string;
-  bagSize: string;
-  destinationPort: string;
-  contactName: string;
-  contactEmail: string;
-  contactPhone: string;
-  companyName: string;
+  orderId?: string;
+  buyerId?: string;
+  commodityId?: string;
+  commodityName?: string;
+  items?: Array<{
+    id?: string;
+    name: string;
+    price?: string | number;
+    variety?: string;
+    quantity?: number;
+    moq?: string;
+    image?: string;
+  }>;
+  orderType?: 'bulk' | 'sample';
+  volume?: string;
+  bagSize?: string;
+  destinationPort?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  companyName?: string;
+  totalAmount?: number | string;
+  shippingFee?: number | string;
+  paymentMethod?: string;
+  assignedContainer?: string;
   userRole?: 'buyer' | 'farmer';
   notes?: string;
-  status: 'PENDING_REVIEW' | 'PROFORMA_ISSUED' | 'CONFIRMED' | 'DISPATCHED';
+  status: 'PENDING_REVIEW' | 'PROFORMA_ISSUED' | 'CONFIRMED' | 'DISPATCHED' | 'CANCELLED';
   createdAt: string;
 }
 

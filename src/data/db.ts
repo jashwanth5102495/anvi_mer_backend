@@ -425,6 +425,21 @@ class DatabaseService {
         }
       }
 
+      // Read persistent orders from PostgreSQL
+      const orderRes = await client.query('SELECT data FROM anvi_orders ORDER BY created_at DESC');
+      if (orderRes.rows.length > 0) {
+        console.log(`[DB] Loaded ${orderRes.rows.length} orders from PostgreSQL`);
+        this.data.orders = orderRes.rows.map(r => r.data);
+        this.saveData();
+      } else if (this.data.orders.length > 0) {
+        for (const o of this.data.orders) {
+          await client.query(
+            'INSERT INTO anvi_orders (id, data) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING',
+            [o.id, JSON.stringify(o)]
+          );
+        }
+      }
+
       client.release();
     } catch (err) {
       console.error('[DB] PostgreSQL initialization error:', err);
@@ -593,12 +608,12 @@ class DatabaseService {
     return this.data.orders;
   }
 
-  public createOrder(orderData: Omit<OrderRequest, 'id' | 'status' | 'createdAt'>): OrderRequest {
+  public createOrder(orderData: Partial<OrderRequest>): OrderRequest {
     const newOrder: OrderRequest = {
-      id: `ORD-${Date.now().toString().slice(-6)}`,
+      id: orderData.orderId || orderData.id || `ORD-${Date.now().toString().slice(-6)}`,
+      status: orderData.status || 'PENDING_REVIEW',
+      createdAt: new Date().toISOString(),
       ...orderData,
-      status: 'PENDING_REVIEW',
-      createdAt: new Date().toISOString()
     };
     this.data.orders.unshift(newOrder);
     this.saveData();
@@ -611,6 +626,40 @@ class DatabaseService {
     }
 
     return newOrder;
+  }
+
+  public updateOrderStatus(id: string, status: OrderRequest['status']): OrderRequest | null {
+    const orderIndex = this.data.orders.findIndex(o => o.id === id || o.orderId === id);
+    if (orderIndex === -1) return null;
+
+    this.data.orders[orderIndex].status = status;
+    const updated = this.data.orders[orderIndex];
+    this.saveData();
+
+    if (pool && pgConnected) {
+      pool.query(
+        'UPDATE anvi_orders SET data = $1 WHERE id = $2',
+        [JSON.stringify(updated), updated.id]
+      ).catch(err => console.error('[DB] Postgres update order error:', err));
+    }
+
+    return updated;
+  }
+
+  public deleteOrder(id: string): boolean {
+    const prevLen = this.data.orders.length;
+    this.data.orders = this.data.orders.filter(o => o.id !== id && o.orderId !== id);
+    if (this.data.orders.length !== prevLen) {
+      this.saveData();
+
+      if (pool && pgConnected) {
+        pool.query('DELETE FROM anvi_orders WHERE id = $1', [id])
+          .catch(err => console.error('[DB] Postgres delete order error:', err));
+      }
+
+      return true;
+    }
+    return false;
   }
 
   // --- CONTAINER TRACKINGS ---
