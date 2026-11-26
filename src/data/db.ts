@@ -640,6 +640,23 @@ class DatabaseService {
     return newListing;
   }
 
+  public deleteFarmerListing(id: string): boolean {
+    const prevLen = this.data.farmerListings.length;
+    this.data.farmerListings = this.data.farmerListings.filter(l => l.id !== id);
+    this.data.commodities = this.data.commodities.filter(c => c.id !== id);
+    if (this.data.farmerListings.length !== prevLen) {
+      this.saveData();
+      if (pool && pgConnected) {
+        pool.query('DELETE FROM anvi_farmer_listings WHERE id = $1', [id])
+          .catch(err => console.error('[DB] Postgres delete listing error:', err));
+        pool.query('DELETE FROM anvi_commodities WHERE id = $1', [id])
+          .catch(err => console.error('[DB] Postgres delete commodity error:', err));
+      }
+      return true;
+    }
+    return false;
+  }
+
   // --- ORDER OPERATIONS ---
   public getOrders(): OrderRequest[] {
     return this.data.orders;

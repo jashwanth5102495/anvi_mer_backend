@@ -150,3 +150,19 @@ adminRouter.get('/farmer-listings', (_req: Request, res: Response) => {
     data: db.getFarmerListings()
   });
 });
+
+// DELETE /api/admin/farmer-listings/:id - Admin remove farmer product from mobile app
+adminRouter.delete('/farmer-listings/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const deleted = db.deleteFarmerListing(id);
+  if (!deleted) {
+    return res.status(404).json({
+      success: false,
+      message: `Product "${id}" not found in database.`
+    });
+  }
+  res.json({
+    success: true,
+    message: `Product "${id}" successfully removed from mobile app & database.`
+  });
+});

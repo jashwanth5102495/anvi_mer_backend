@@ -76,6 +76,23 @@ farmerRouter.post('/listings', (req: Request, res: Response) => {
   });
 });
 
+// DELETE /api/farmer/listings/:id - Admin/Farmer remove produce lot
+farmerRouter.delete('/listings/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const deleted = db.deleteFarmerListing(id);
+  if (deleted) {
+    res.json({
+      success: true,
+      message: `Produce lot "${id}" removed from catalog and database.`
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      message: `Produce lot "${id}" not found.`
+    });
+  }
+});
+
 // GET /api/farmer/msp - Live Mandi MSP benchmarks
 farmerRouter.get('/msp', (_req: Request, res: Response) => {
   res.json({
