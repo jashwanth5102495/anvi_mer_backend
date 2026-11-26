@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { db } from '../data/db.js';
+import { whatsappService } from '../services/whatsapp.service.js';
 
 export const ordersRouter = Router();
 
@@ -58,6 +59,11 @@ ordersRouter.post('/', (req: Request, res: Response) => {
     contactPhone: orderData.contactPhone || '+971 50 884 1029',
     totalAmount: orderData.totalAmount || 101.00,
     status: 'PENDING_REVIEW'
+  });
+
+  // Dispatch automated WhatsApp alert to +91 8328246413
+  whatsappService.sendOrderAlert(newOrder, 'default', '8328246413').catch((err) => {
+    console.error('[Orders] WhatsApp order dispatch failed (caught safely):', err);
   });
 
   res.status(201).json({

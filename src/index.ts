@@ -8,6 +8,8 @@ import { trackingRouter } from './routes/tracking.js';
 import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { farmerRouter } from './routes/farmer.js';
+import { whatsappRouter } from './routes/whatsapp.js';
+import { cronService } from './services/cron.service.js';
 import { db } from './data/db.js';
 
 dotenv.config();
@@ -69,6 +71,8 @@ app.use('/api/tracking', trackingRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/farmer', farmerRouter);
+app.use('/api/whatsapp', whatsappRouter);
+app.use('/api', whatsappRouter); // For /api/v1/tenants/...
 
 app.use('/api/v1/commodities', commoditiesRouter);
 app.use('/api/v1/orders', ordersRouter);
@@ -76,10 +80,14 @@ app.use('/api/v1/tracking', trackingRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/farmer', farmerRouter);
+app.use('/api/v1/whatsapp', whatsappRouter);
 
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[ANVI-BACKEND] Server listening on port ${PORT}`);
   console.log(`[ANVI-BACKEND] Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`[ANVI-BACKEND] Health check available at: http://localhost:${PORT}/health`);
+  
+  // Initialize automated shift report cron
+  cronService.init();
 });

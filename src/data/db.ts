@@ -591,6 +591,43 @@ class DatabaseService {
       createdAt: new Date().toISOString()
     };
     this.data.farmerListings.unshift(newListing);
+
+    // Automatically make farmer-listed produce available in Buyer Commodities Catalog
+    const categoryLower = (newListing.category || 'rice').toLowerCase();
+    const commodityCategory: Commodity['category'] = 
+      ['rice', 'chilly', 'fruits', 'makhana', 'grapes', 'marine'].includes(categoryLower)
+        ? (categoryLower as any)
+        : 'rice';
+
+    const cleanPrice = newListing.priceUsd 
+      ? newListing.priceUsd 
+      : newListing.askingPrice.includes('$')
+        ? newListing.askingPrice
+        : `$${Math.max(45, Math.round(parseInt(newListing.askingPrice.replace(/\D/g, '') || '4000') / 50))}.00`;
+
+    const newCommodity: Commodity = {
+      id: newListing.id,
+      name: newListing.cropName,
+      category: commodityCategory,
+      origin: `${newListing.farmLocation} · ${newListing.mandiHub}`,
+      moq: newListing.lotQuantity || '10 MT MOQ',
+      packaging: newListing.packaging || '50kg PP Bags',
+      specifications: {
+        variety: newListing.variety,
+        grade: newListing.verifiedGrade,
+        moistureOrSpecs: newListing.moistureOrSpecs,
+        harvestDate: newListing.harvestDate,
+        farmer: newListing.farmerName,
+      },
+      image: newListing.image || 'preset-steam-sona',
+      inStock: true,
+      transitPorts: ['Krishnapatnam / Chennai Port', 'Mundra Port'],
+      price: cleanPrice,
+    };
+
+    // Add directly to commodities catalog for buyers
+    this.data.commodities = [newCommodity, ...this.data.commodities.filter(c => c.id !== newCommodity.id)];
+
     this.saveData();
 
     if (pool && pgConnected) {
